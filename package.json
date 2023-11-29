@@ -20,6 +20,7 @@
   "homepage": "https://github.com/vuolen/DS2023-JATELE#readme",
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "peer": "^1.0.1"
   }
 }
