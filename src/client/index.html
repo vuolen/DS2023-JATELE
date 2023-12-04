@@ -9,31 +9,35 @@
     <h1>JATELE</h1>
     <textarea readonly></textarea>
     <input type="text" placeholder="Enter your message here..." />
-    <div id="debug">
-    </div>
+    <div id="debug"></div>
   </body>
   <script>
     const textarea = document.querySelector("textarea");
     const input = document.querySelector("input");
     const debug = document.querySelector("#debug");
 
+    const keepActive = (id) => {
+      fetch("http://localhost:3000/active", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id }),
+      });
+    };
+
     const peer = new Peer(null, {
       host: "localhost",
       port: 3000,
       path: "/peer",
-      debug: 3,
+      iceServers: [],
     });
     peer.on("open", async (id) => {
       console.log("My peer ID is: " + id);
 
-      fetch("http://localhost:3000/active", {
-        headers: {
-          "Content-Type": "application/json",
-        },
-        method: "POST",
-        body: JSON.stringify({ id }),
-      });
-      
+      keepActive(id);
+      setInterval(() => keepActive(id), 5000);
+
       const d = await fetch("http://localhost:3000/", {
         headers: {
           "Content-Type": "application/json",
@@ -45,17 +49,20 @@
           let connection = peer.connect(id);
           console.log("Connecting to ", id);
           connection.on("open", () => {
+            console.info("Connected to ", id);
             connection.send("hi!");
-            console.info("Connected to ", id)
           });
+
           connection.on("data", (data) => {
-            console.info("DATA!", data)
+            console.info("DATA!", data);
             addToTextArea(data);
-          })
+          });
+
           connection.on("error", (err) => {
             console.error(err);
             connection.close();
           });
+
           connection.on("close", () => {
             connection.close();
           });
@@ -69,7 +76,6 @@
       debug.innerHTML += "<br>Connections " + peer._connections.size;
       debug.innerHTML += "<br>Event count " + peer._eventsCount;
     }, 500);
-    
 
     const addToTextArea = (text) => {
       textarea.value += "\n" + text;
@@ -78,7 +84,7 @@
 
     input.addEventListener("keyup", (e) => {
       if (e.key === "Enter" && input.value.length > 0) {
-        addToTextArea(input.value)
+        addToTextArea(input.value);
         input.value = "";
       }
     });
