@@ -15,6 +15,7 @@
     const textarea = document.querySelector("textarea");
     const input = document.querySelector("input");
     const debug = document.querySelector("#debug");
+    let clients = {};
 
     const keepActive = (id) => {
       fetch("http://localhost:3000/active", {
@@ -26,48 +27,79 @@
       });
     };
 
+    const getClients = () => {
+      fetch("http://localhost:3000/", {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }).then((res) =>
+        res.json().then((data) => {
+          data.clients.forEach((id) => {
+            if (!clients[id] && id !== peer.id) {
+              clients[id] = connect(id);
+            }
+          });
+
+          Object.keys(clients).forEach((id) => {
+            if (!data.clients.includes(id)) {
+              clients[id].close();
+              delete clients[id];
+            }
+          });
+        })
+      );
+    };
+
+    const initConnection = (conn) => {
+      conn.on("data", (data) => {
+        console.log("DATA: ", data);
+        addToTextArea(data);
+      });
+
+      conn.on("error", (err) => {
+        console.error(err);
+        conn.close();
+      });
+
+      conn.on("close", () => {
+        conn.close();
+      });
+    };
+
+    const connect = (id) => {
+      let connection = peer.connect(id);
+      console.log("Connecting to ", id);
+
+      connection.on("open", () => {
+        console.info("Connected to ", id);
+
+        initConnection(connection);
+      });
+
+      return connection;
+    };
+
     const peer = new Peer(null, {
       host: "localhost",
       port: 3000,
       path: "/peer",
       iceServers: [],
     });
+
     peer.on("open", async (id) => {
       console.log("My peer ID is: " + id);
 
       keepActive(id);
       setInterval(() => keepActive(id), 5000);
 
-      const d = await fetch("http://localhost:3000/", {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
+      getClients();
+    });
 
-      d.json().then((data) => {
-        data["clients"].forEach((id) => {
-          let connection = peer.connect(id);
-          console.log("Connecting to ", id);
-          connection.on("open", () => {
-            console.info("Connected to ", id);
-            connection.send("hi!");
-          });
+    peer.on("connection", (conn) => {
+      console.info("Connection received from ", conn.peer);
+      clients[conn.peer] = conn;
 
-          connection.on("data", (data) => {
-            console.info("DATA!", data);
-            addToTextArea(data);
-          });
-
-          connection.on("error", (err) => {
-            console.error(err);
-            connection.close();
-          });
-
-          connection.on("close", () => {
-            connection.close();
-          });
-        });
-      });
+      initConnection(conn);
     });
 
     setInterval(() => {
@@ -85,6 +117,9 @@
     input.addEventListener("keyup", (e) => {
       if (e.key === "Enter" && input.value.length > 0) {
         addToTextArea(input.value);
+        Object.entries(clients).forEach(([id, client]) => {
+          client.send(input.value);
+        });
         input.value = "";
       }
     });
