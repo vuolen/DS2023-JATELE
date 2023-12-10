@@ -10,6 +10,7 @@
     <textarea readonly></textarea>
     <input type="text" placeholder="Enter your message here..." />
     <div id="debug"></div>
+    <div id="log"></div>
   </body>
   <script>
     const textarea = document.querySelector("textarea");
@@ -22,6 +23,7 @@
     let electionTimeout;
     let heartbeatTimeout;
     let currentTerm = 0;
+    let log = [];
     let state = "follower";
     let votedFor = null;
     let votesReceived = 0;
@@ -80,6 +82,7 @@
               type: "AppendEntries",
               term: currentTerm,
               leaderId: peer.id,
+              entries: log,
             });
           });
         }, 2000);
@@ -90,9 +93,11 @@
       if (message.term >= currentTerm) {
         currentTerm = message.term;
         state = "follower";
+        log = message.entries;
         resetElectionTimeout();
       } else if (state === "candidate") {
         state = "follower";
+        log = message.entries;
         resetElectionTimeout();
       }
     };
@@ -103,6 +108,19 @@
     };
 
     resetElectionTimeout();
+
+    const updateLogDisplay = () => {
+      const logElement = document.getElementById("log");
+      logElement.innerHTML = "";
+      log.forEach((entry, index) => {
+        if (entry.type === "system") {
+          const userId = entry.content.split(" ")[1];
+          const action = entry.content.split(" ").slice(3).join(" ");
+          const timestamp = new Date(entry.timestamp).toLocaleString();
+          logElement.innerHTML += `<p>Entry ${index + 1}: User ${userId} ${action} at ${timestamp}</p>`;
+        }
+      });
+    };
 
     // #endregion
 
@@ -162,6 +180,16 @@
         console.info(conn.peer, "Connection closed");
         conn.close();
 
+        if (state === "leader") {
+          log.push({
+            content: `User ${conn.peer} has left the chat`,
+            senderId: peer.id,
+            timestamp: Date.now(),
+            type: "system",
+          });
+          updateLogDisplay();
+        }
+
         delete clients[conn.peer];
       });
     };
@@ -199,6 +227,16 @@
       console.info("Connection received from ", conn.peer);
       clients[conn.peer] = conn;
 
+      if (state === "leader") {
+        log.push({
+          content: `User ${conn.peer} has joined the chat`,
+          senderId: peer.id,
+          timestamp: Date.now(),
+          type: "system",
+        });
+        updateLogDisplay();
+      }
+
       initConnection(conn);
     });
 
@@ -222,6 +260,13 @@
           client.send(input.value);
         });
         input.value = "";
+      }
+    });
+
+    // Print log to console when "L" key is pressed
+    document.addEventListener("keydown", (e) => {
+      if (e.keyCode === 76) {
+        console.log(log);
       }
     });
   </script>
