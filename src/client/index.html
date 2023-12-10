@@ -17,64 +17,94 @@
     const debug = document.querySelector("#debug");
     let clients = {};
 
-    const randomTimeout = () => Math.random() * 1000 + 3000;
+    // #region RAFT
 
-    let raft = {
-      log: [],
-    };
+    let electionTimeout;
+    let heartbeatTimeout;
+    let currentTerm = 0;
+    let state = "follower";
+    let votedFor = null;
+    let votesReceived = 0;
 
-    const raftElectionTimeout = () => {
-      console.log("Election timeout, promoting to candidate", raft);
-
-      raft.state = "candidate";
-      raft.term++;
-      raft.votedFor = peer.id;
-      raft.timeout = setTimeout(raftElectionTimeout, randomTimeout());
-      raftVoteReceived();
-
-      Object.entries(clients).forEach(([id, conn]) => {
-        conn.send({
-          type: "REQUEST_VOTE",
-          // TODO log index and term
-          term: raft.term,
+    const startElection = () => {
+      if (state !== "candidate") {
+        state = "candidate";
+        currentTerm++;
+        votedFor = peer.id;
+        votesReceived = 1;
+        Object.values(clients).forEach((client) => {
+          client.send({
+            type: "RequestVote",
+            term: currentTerm,
+            candidateId: peer.id,
+          });
         });
-      });
-    };
-
-    const raftConvertToFollower = (term) => {
-      raft.state = "follower";
-      raft.term = term;
-      raft.votedFor = null;
-      raft.votesReceived = 0;
-      clearTimeout(raft.timeout);
-      raft.timeout = setTimeout(raftElectionTimeout, randomTimeout());
-    };
-
-    raftConvertToFollower(0);
-
-    const raftVoteReceived = () => {
-      raft.votesReceived++;
-      if (raft.votesReceived > Object.keys(clients).length / 2) {
-        console.log("Promoting to leader", raft);
-        raft.state = "leader";
-        raft.votesReceived = 0;
-        clearTimeout(raft.timeout);
-        // TODO send heartbeat
+        if (Object.keys(clients).length <= 1) {
+          console.log("promoting to leader");
+          state = "leader";
+          startHeartbeat();
+        }
       }
     };
 
-    const raftSendAppendEntries = () => {
-      Object.entries(clients).forEach(([id, conn]) => {
-        conn.send({
-          type: "APPEND_ENTRIES",
-          // TODO log index and term
-          term: raft.term,
-          entries: [],
+    const handleRequestVote = (message) => {
+      if (message.term > currentTerm && state !== "leader") {
+        currentTerm = message.term;
+        votedFor = message.candidateId;
+        state = "follower";
+        clients[message.candidateId].send({
+          type: "Vote",
+          term: currentTerm,
+          voteGranted: true,
         });
-      });
+        resetElectionTimeout();
+      }
     };
 
-    raft.timeout = setTimeout(raftElectionTimeout, randomTimeout());
+    const handleVote = (message) => {
+      if (message.term === currentTerm && state === "candidate") {
+        votesReceived++;
+        if (votesReceived > Object.keys(clients).length / 2) {
+          console.log("promoting to leader");
+          state = "leader";
+          startHeartbeat();
+        }
+      }
+    };
+
+    const startHeartbeat = () => {
+      if (state === "leader") {
+        heartbeatTimeout = setInterval(() => {
+          Object.values(clients).forEach((client) => {
+            client.send({
+              type: "AppendEntries",
+              term: currentTerm,
+              leaderId: peer.id,
+            });
+          });
+        }, 2000);
+      }
+    };
+
+    const handleAppendEntries = (message) => {
+      if (message.term >= currentTerm) {
+        currentTerm = message.term;
+        state = "follower";
+        resetElectionTimeout();
+      } else if (state === "candidate") {
+        state = "follower";
+        resetElectionTimeout();
+      }
+    };
+
+    const resetElectionTimeout = () => {
+      clearTimeout(electionTimeout);
+      electionTimeout = setTimeout(startElection, Math.floor(Math.random() * (6000 - 3000 + 1) + 3000));
+    };
+
+    resetElectionTimeout();
+
+    // #endregion
 
     const keepActive = (id) => {
       fetch("http://localhost:3000/active", {
@@ -112,49 +142,12 @@
     const initConnection = (conn) => {
       conn.on("data", (message) => {
         console.log(conn.peer, message);
-
-        if (message.type === "REQUEST_VOTE") {
-          // TODO, check log index and term
-          if (message.term < raft.term) {
-            conn.send({
-              type: "REQUEST_VOTE_RESPONSE",
-              term: raft.term,
-              voteGranted: false,
-            });
-          } else if (raft.votedFor === null || raft.votedFor === conn.id) {
-            console.log("Voting for", conn.id);
-            raft.votedFor = conn.id;
-            conn.send({
-              type: "REQUEST_VOTE_RESPONSE",
-              term: raft.term,
-              voteGranted: true,
-            });
-          } else {
-            conn.send({
-              type: "REQUEST_VOTE_RESPONSE",
-              term: raft.term,
-              voteGranted: false,
-            });
-          }
-        } else if (message.type === "REQUEST_VOTE_RESPONSE") {
-          if (message.term > raft.term) {
-            raftConvertToFollower(message.term);
-          } else if (message.voteGranted) {
-            raftVoteReceived();
-          }
-        } else if (message.type === "APPEND_ENTRIES") {
-          if (message.term < raft.term) {
-            conn.send({
-              type: "APPEND_ENTRIES_RESPONSE",
-              term: raft.term,
-              success: false,
-            });
-          } else if (raft.state === "candidate") {
-            raftConvertToFollower(message.term);
-          }
-          // TODO Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
-        } else if (message.type === "APPEND_ENTRIES_RESPONSE") {
-          // TODO
+        if (message.type === "RequestVote") {
+          handleRequestVote(message);
+        } else if (message.type === "Vote") {
+          handleVote(message);
+        } else if (message.type === "AppendEntries") {
+          handleAppendEntries(message);
         } else {
           addToTextArea(conn.peer + ": " + message);
         }
@@ -214,6 +207,7 @@
       debug.innerHTML += peer.open ? "PeerJS open" : "PeerJS closed";
       debug.innerHTML += "<br>Connections " + peer._connections.size;
       debug.innerHTML += "<br>Event count " + peer._eventsCount;
+      debug.innerHTML += "<br>Current state " + "<b>" + state + "</b>";
     }, 500);
 
     const addToTextArea = (text) => {
