@@ -11,6 +11,7 @@
     <textarea readonly></textarea>
     <input type="text" placeholder="Enter your message here..." />
     <div id="debug"></div>
+    <div id="log"></div>
   </body>
   <script type="module">
     import { createRaft, handleRaftMessage } from "./raft.js";
@@ -19,6 +20,21 @@
     const input = document.querySelector("input");
     const debug = document.querySelector("#debug");
     let clients = {};
+
+    const updateLogDisplay = () => {
+      const logElement = document.getElementById("log");
+      logElement.innerHTML = "";
+      raft.log.forEach((entry, index) => {
+        if (entry.type === "system") {
+          const userId = entry.content.split(" ")[1];
+          const action = entry.content.split(" ").slice(3).join(" ");
+          const timestamp = new Date(entry.timestamp).toLocaleString();
+          logElement.innerHTML += `<p>Entry ${
+            index + 1
+          }: User ${userId} ${action} at ${timestamp}</p>`;
+        }
+      });
+    };
 
     const keepActive = (id) => {
       fetch("http://localhost:3000/active", {
@@ -61,6 +77,8 @@
 
         if (message.type.startsWith("RAFT_")) {
           handleRaftMessage(raft, message);
+        } else {
+          addToTextArea(conn.peer + ": " + message);
         }
       });
 
@@ -72,6 +90,16 @@
       conn.on("close", () => {
         console.info(conn.peer, "Connection closed");
         conn.close();
+
+        if (state === "leader") {
+          log.push({
+            content: `User ${conn.peer} has left the chat`,
+            senderId: peer.id,
+            timestamp: Date.now(),
+            type: "system",
+          });
+          updateLogDisplay();
+        }
 
         delete clients[conn.peer];
       });
@@ -112,6 +140,16 @@
       console.info("Connection received from ", conn.peer);
       clients[conn.peer] = conn;
 
+      if (state === "leader") {
+        log.push({
+          content: `User ${conn.peer} has joined the chat`,
+          senderId: peer.id,
+          timestamp: Date.now(),
+          type: "system",
+        });
+        updateLogDisplay();
+      }
+
       initConnection(conn);
     });
 
@@ -135,6 +173,13 @@
           client.send(input.value);
         });
         input.value = "";
+      }
+    });
+
+    // Print log to console when "L" key is pressed
+    document.addEventListener("keydown", (e) => {
+      if (e.keyCode === 76) {
+        console.log(log);
       }
     });
   </script>

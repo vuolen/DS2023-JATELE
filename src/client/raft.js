@@ -32,8 +32,24 @@ const raftConvertToCandidate = (raft) => {
       type: "REQUEST_VOTE",
       // TODO log index and term
       term: raft.term,
+      candidateId: raft.peer.id,
     });
   });
+};
+
+const startHeartbeat = (raft) => {
+  if (raft.state === "leader") {
+    heartbeatTimeout = setInterval(() => {
+      Object.values(raft.getClients()).forEach((client) => {
+        client.send({
+          type: "RAFT_APPEND_ENTRIES",
+          term: currentTerm,
+          leaderId: raft.peer.id,
+          entries: raft.log,
+        });
+      });
+    }, 1500);
+  }
 };
 
 const raftVoteReceived = (raft) => {
@@ -47,7 +63,7 @@ const raftVoteReceived = (raft) => {
     );
     raft.state = "leader";
     clearTimeout(raft.timeout);
-    // TODO send heartbeat
+    startHeartbeat();
   }
 };
 
@@ -58,7 +74,13 @@ function createRaft(peer, getClients) {
   return raft;
 }
 
-function handleRequestVote(raft, sender, message) {
+const handleRequestVote = (raft, message) => {
+  if (message.term > raft.term && raft.state !== "leader") {
+    resetElectionTimeout();
+  }
+};
+
+function handleRequestVote(raft, message) {
   // TODO, check log index and term
 
   let voteGranted = false;
@@ -69,7 +91,9 @@ function handleRequestVote(raft, sender, message) {
   ) {
     console.log("Voting for", conn.id);
     raft.votedFor = conn.id;
+    raft.term = message.term;
     voteGranted = true;
+    raftConvertToFollower(raft, message.term);
   }
 
   message.sender.send({
@@ -82,20 +106,30 @@ function handleRequestVote(raft, sender, message) {
 function handleRequestVoteResponse(raft, message) {
   if (message.term > raft.term) {
     raftConvertToFollower(message.term);
-  } else if (message.voteGranted) {
+  } else if (
+    message.term === raft.term &&
+    raft.state === "candidate" &&
+    message.voteGranted
+  ) {
     raftVoteReceived(raft);
   }
 }
 
-function handleAppendEntries(raft, sender, message) {
+function handleAppendEntries(raft, message) {
   if (message.term < raft.term) {
     message.sender.send({
       type: "APPEND_ENTRIES_RESPONSE",
       term: raft.term,
       success: false,
     });
-  } else if (raft.state === "candidate") {
-    raftConvertToFollower(message.term);
+  } else {
+    raftConvertToFollower(raft, message.term);
+    raft.log = message.entries;
+    message.sender.send({
+      type: "APPEND_ENTRIES_RESPONSE",
+      term: raft.term,
+      success: true,
+    });
   }
   // TODO Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
 }
