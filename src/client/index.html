@@ -73,9 +73,8 @@
       conn.on("data", (message) => {
         console.log(conn.peer, message);
 
-        message.sender = conn.peer;
-
         if (message.type.startsWith("RAFT_")) {
+          message.sender = clients[conn.peer];
           handleRaftMessage(raft, message);
         } else {
           addToTextArea(conn.peer + ": " + message);
@@ -91,8 +90,8 @@
         console.info(conn.peer, "Connection closed");
         conn.close();
 
-        if (state === "leader") {
-          log.push({
+        if (raft.state === "leader") {
+          raft.log.push({
             content: `User ${conn.peer} has left the chat`,
             senderId: peer.id,
             timestamp: Date.now(),
@@ -140,7 +139,7 @@
       console.info("Connection received from ", conn.peer);
       clients[conn.peer] = conn;
 
-      if (state === "leader") {
+      if (raft.state === "leader") {
         log.push({
           content: `User ${conn.peer} has joined the chat`,
           senderId: peer.id,
@@ -154,10 +153,8 @@
     });
 
     setInterval(() => {
-      debug.innerHTML = "My ID" + peer.id + "<br>";
-      debug.innerHTML += peer.open ? "PeerJS open" : "PeerJS closed";
+      debug.innerHTML = "My ID " + peer.id + "<br>";
       debug.innerHTML += "<br>Connections " + peer._connections.size;
-      debug.innerHTML += "<br>Event count " + peer._eventsCount;
       debug.innerHTML += "<br>Raft state " + raft.state;
     }, 500);
 

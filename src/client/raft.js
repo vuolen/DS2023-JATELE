@@ -17,6 +17,9 @@ const raftConvertToFollower = (raft, term) => {
   raft.votedFor = null;
   raft.votesReceived = 0;
   raftResetTimeout(raft);
+  if (raft.heartbeatTimeout) {
+    clearInterval(raft.heartbeatTimeout);
+  }
 };
 
 const raftConvertToCandidate = (raft) => {
@@ -26,10 +29,13 @@ const raftConvertToCandidate = (raft) => {
   raft.votesReceived = 0;
   raftResetTimeout(raft);
   raftVoteReceived(raft);
+  if (raft.heartbeatTimeout) {
+    clearInterval(raft.heartbeatTimeout);
+  }
 
   Object.entries(raft.getClients()).forEach(([id, conn]) => {
     conn.send({
-      type: "REQUEST_VOTE",
+      type: "RAFT_REQUEST_VOTE",
       // TODO log index and term
       term: raft.term,
       candidateId: raft.peer.id,
@@ -39,11 +45,11 @@ const raftConvertToCandidate = (raft) => {
 
 const startHeartbeat = (raft) => {
   if (raft.state === "leader") {
-    heartbeatTimeout = setInterval(() => {
+    raft.heartbeatTimeout = setInterval(() => {
       Object.values(raft.getClients()).forEach((client) => {
         client.send({
           type: "RAFT_APPEND_ENTRIES",
-          term: currentTerm,
+          term: raft.term,
           leaderId: raft.peer.id,
           entries: raft.log,
         });
@@ -63,7 +69,7 @@ const raftVoteReceived = (raft) => {
     );
     raft.state = "leader";
     clearTimeout(raft.timeout);
-    startHeartbeat();
+    startHeartbeat(raft);
   }
 };
 
@@ -74,12 +80,6 @@ function createRaft(peer, getClients) {
   return raft;
 }
 
-const handleRequestVote = (raft, message) => {
-  if (message.term > raft.term && raft.state !== "leader") {
-    resetElectionTimeout();
-  }
-};
-
 function handleRequestVote(raft, message) {
   // TODO, check log index and term
 
@@ -87,17 +87,18 @@ function handleRequestVote(raft, message) {
 
   if (
     message.term >= raft.term &&
-    (raft.votedFor === null || raft.votedFor === conn.id)
+    (raft.votedFor === null || raft.votedFor === message.candidateId)
   ) {
-    console.log("Voting for", conn.id);
-    raft.votedFor = conn.id;
+    console.log("Voting for", message.candidateId);
+    raft.votedFor = message.candidateId;
     raft.term = message.term;
     voteGranted = true;
     raftConvertToFollower(raft, message.term);
   }
 
+  console.log(message.sender);
   message.sender.send({
-    type: "REQUEST_VOTE_RESPONSE",
+    type: "RAFT_REQUEST_VOTE_RESPONSE",
     term: raft.term,
     voteGranted,
   });
@@ -118,7 +119,7 @@ function handleRequestVoteResponse(raft, message) {
 function handleAppendEntries(raft, message) {
   if (message.term < raft.term) {
     message.sender.send({
-      type: "APPEND_ENTRIES_RESPONSE",
+      type: "RAFT_APPEND_ENTRIES_RESPONSE",
       term: raft.term,
       success: false,
     });
@@ -126,7 +127,7 @@ function handleAppendEntries(raft, message) {
     raftConvertToFollower(raft, message.term);
     raft.log = message.entries;
     message.sender.send({
-      type: "APPEND_ENTRIES_RESPONSE",
+      type: "RAFT_APPEND_ENTRIES_RESPONSE",
       term: raft.term,
       success: true,
     });
