@@ -37,7 +37,7 @@
     };
 
     const keepActive = (id) => {
-      fetch("http://localhost:3000/active", {
+      return fetch("http://localhost:3000/active", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -75,9 +75,8 @@
 
         if (message.type.startsWith("RAFT_")) {
           message.sender = clients[conn.peer];
+          console.log("RAFT MESSAGE ", message);
           handleRaftMessage(raft, message);
-        } else {
-          addToTextArea(conn.peer + ": " + message);
         }
       });
 
@@ -130,7 +129,18 @@
       console.log("My peer ID is: " + id);
 
       keepActive(id);
-      setInterval(() => keepActive(id), 5000);
+      setInterval(() => {
+        keepActive(id)
+          .then((res) => res.json())
+          .then((body) => {
+            Object.entries(clients).forEach(([id, conn]) => {
+              if (!body.clients.includes(id)) {
+                conn.close();
+                delete clients[conn.peer];
+              }
+            });
+          });
+      }, 1500);
 
       getClients();
     });
@@ -140,12 +150,12 @@
       clients[conn.peer] = conn;
 
       if (raft.state === "leader") {
-        log.push({
-          content: `User ${conn.peer} has joined the chat`,
-          senderId: peer.id,
-          timestamp: Date.now(),
-          type: "system",
-        });
+        // raft.log.push({
+        //   content: `User ${conn.peer} has joined the chat`,
+        //   senderId: peer.id,
+        //   timestamp: Date.now(),
+        //   type: "system",
+        // });
         updateLogDisplay();
       }
 
@@ -154,8 +164,15 @@
 
     setInterval(() => {
       debug.innerHTML = "My ID " + peer.id + "<br>";
-      debug.innerHTML += "<br>Connections " + peer._connections.size;
+      debug.innerHTML += "<br>Connections " + Object.keys(clients).length;
       debug.innerHTML += "<br>Raft state " + raft.state;
+
+      textarea.value = "";
+      raft.log.forEach((entry) => {
+        if (entry.type === "RAFT_MESSAGE") {
+          textarea.value += entry.sender + ": " + entry.text + "\n";
+        }
+      });
     }, 500);
 
     const addToTextArea = (text) => {
@@ -165,9 +182,10 @@
 
     input.addEventListener("keyup", (e) => {
       if (e.key === "Enter" && input.value.length > 0) {
-        addToTextArea(input.value);
-        Object.entries(clients).forEach(([id, client]) => {
-          client.send(input.value);
+        handleRaftMessage(raft, {
+          type: "RAFT_MESSAGE",
+          text: input.value,
+          sender: peer,
         });
         input.value = "";
       }
@@ -176,7 +194,7 @@
     // Print log to console when "L" key is pressed
     document.addEventListener("keydown", (e) => {
       if (e.keyCode === 76) {
-        console.log(log);
+        console.log(raft.log);
       }
     });
   </script>

@@ -12,11 +12,11 @@ setInterval(() => {
   const len = Object.keys(clients).length;
   clients = Object.fromEntries(
     Object.entries(clients).filter(
-      ([_, timestamp]) => new Date().getTime() - timestamp < 20000
+      ([_, timestamp]) => new Date().getTime() - timestamp < 5000
     )
   );
   console.log(`Cleared ${len - Object.keys(clients).length} clients`);
-}, 10000);
+}, 2500);
 
 server = app.listen(port, () =>
   console.log(`Example app listening at http://localhost:${port}`)
@@ -36,5 +36,6 @@ app.get("/", (req, res) => res.json({ clients: Object.keys(clients) }));
 app.post("/active", (req, res) => {
   clients[req.body.id] = new Date().getTime();
   res.status(200);
+  res.send({ clients: Object.keys(clients) });
   res.end();
 });
