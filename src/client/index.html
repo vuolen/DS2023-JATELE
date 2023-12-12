@@ -8,36 +8,22 @@
   </head>
   <body>
     <h1>JATELE</h1>
-    <textarea readonly></textarea>
+    <div id="chat"></div>
     <input type="text" placeholder="Enter your message here..." />
     <div id="debug"></div>
-    <div id="log"></div>
   </body>
   <script type="module">
     import { createRaft, handleRaftMessage } from "./raft.js";
 
-    const textarea = document.querySelector("textarea");
+    const MATCHMAKER_URL = "http://" + window.location.hostname + ":3000";
+
+    const chat = document.querySelector("#chat");
     const input = document.querySelector("input");
     const debug = document.querySelector("#debug");
     let clients = {};
 
-    const updateLogDisplay = () => {
-      const logElement = document.getElementById("log");
-      logElement.innerHTML = "";
-      raft.log.forEach((entry, index) => {
-        if (entry.type === "system") {
-          const userId = entry.content.split(" ")[1];
-          const action = entry.content.split(" ").slice(3).join(" ");
-          const timestamp = new Date(entry.timestamp).toLocaleString();
-          logElement.innerHTML += `<p>Entry ${
-            index + 1
-          }: User ${userId} ${action} at ${timestamp}</p>`;
-        }
-      });
-    };
-
     const keepActive = (id) => {
-      return fetch("http://localhost:3000/active", {
+      return fetch(MATCHMAKER_URL + "/active", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -47,7 +33,7 @@
     };
 
     const getClients = () => {
-      fetch("http://localhost:3000/", {
+      fetch(MATCHMAKER_URL, {
         headers: {
           "Content-Type": "application/json",
         },
@@ -75,7 +61,6 @@
 
         if (message.type.startsWith("RAFT_")) {
           message.sender = clients[conn.peer];
-          console.log("RAFT MESSAGE ", message);
           handleRaftMessage(raft, message);
         }
       });
@@ -90,13 +75,13 @@
         conn.close();
 
         if (raft.state === "leader") {
-          raft.log.push({
-            content: `User ${conn.peer} has left the chat`,
-            senderId: peer.id,
-            timestamp: Date.now(),
-            type: "system",
-          });
-          updateLogDisplay();
+          if (raft.state === "leader") {
+            handleRaftMessage(raft, {
+              type: "RAFT_MESSAGE",
+              text: `User ${conn.peer} has left the chat`,
+              sender: "SYSTEM",
+            });
+          }
         }
 
         delete clients[conn.peer];
@@ -117,7 +102,7 @@
     };
 
     const peer = new Peer(null, {
-      host: "localhost",
+      host: window.location.hostname,
       port: 3000,
       path: "/peer",
       iceServers: [],
@@ -150,13 +135,11 @@
       clients[conn.peer] = conn;
 
       if (raft.state === "leader") {
-        raft.log.push({
-          content: `User ${conn.peer} has joined the chat`,
-          senderId: peer.id,
-          timestamp: Date.now(),
-          type: "system",
+        handleRaftMessage(raft, {
+          type: "RAFT_MESSAGE",
+          text: `User ${conn.peer} has joined the chat`,
+          sender: "SYSTEM",
         });
-        updateLogDisplay();
       }
 
       initConnection(conn);
@@ -169,17 +152,35 @@
       debug.innerHTML += "<br>Term " + raft.term;
       debug.innerHTML += "<br>Commit index " + raft.commitIndex;
 
-      textarea.value = "";
-      raft.log.forEach((entry) => {
+      const newMessages = raft.log.slice(chat.children.length + 1);
+      newMessages.forEach((entry) => {
         if (entry.type === "RAFT_MESSAGE") {
-          textarea.value += entry.sender + ": " + entry.text + "\n";
+          if (entry.sender === "SYSTEM") {
+            chat.innerHTML += `<span class="system-message">${entry.text}</span>`;
+          } else {
+            chat.innerHTML += `<span>${peerIdToSpan(entry.sender)}: ${
+              entry.text
+            }</span>`;
+          }
         }
       });
-    }, 500);
+    }, 250);
 
-    const addToTextArea = (text) => {
-      textarea.value += "\n" + text;
-      textarea.scrollTop = textarea.scrollHeight;
+    const uuidToColour = (uuid) => {
+      let hash = 0;
+      for (let i = 0; i < uuid.length; i++) {
+        hash = uuid.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      let colour = "#";
+      for (let i = 0; i < 3; i++) {
+        let value = (hash >> (i * 8)) & 0xff;
+        colour += ("00" + value.toString(16)).substr(-2);
+      }
+      return colour;
+    };
+
+    const peerIdToSpan = (uuid) => {
+      return `<span style="color: ${uuidToColour(uuid)}">${uuid}</span>`;
     };
 
     input.addEventListener("keyup", (e) => {
@@ -204,12 +205,26 @@
     body {
       display: flex;
       flex-direction: column;
+      align-items: center;
+      background-color: #000000;
+      color: white;
     }
-    textarea {
-      height: 40vh;
+    #chat {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 10px;
+      width: 70%;
+    }
+    .system-message {
+      color: crimson;
+    }
+    .sender {
+      color: gray;
     }
     input {
       padding: 5px;
+      width: 50%;
     }
   </style>
 </html>

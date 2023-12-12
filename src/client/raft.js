@@ -99,7 +99,7 @@ const startHeartbeat = (raft) => {
           client.lastSentIndex = raft.log.length;
         }
       });
-    }, 1000);
+    }, 500);
   }
 };
 
@@ -126,9 +126,12 @@ function createRaft(peer, getClients) {
 function handleRequestVote(raft, message) {
   // TODO, check log index and term
 
+  console.log(`${message.sender.peer} requested vote`);
+
   let voteGranted = false;
 
   if (message.term > raft.term) {
+    console.log(`New term, resetting vote`);
     raft.term = message.term;
     raft.votedFor = null;
   }
@@ -179,8 +182,8 @@ function handleAppendEntries(raft, message) {
     if (message.prevLogIndex >= 0) {
       raft.log = raft.log.slice(0, message.prevLogIndex + 2);
     }
-  
-    raft.log.push(...message.entries);  
+
+    raft.log.push(...message.entries);
 
     message.sender.send({
       type: "RAFT_APPEND_ENTRIES_RESPONSE",
@@ -202,7 +205,7 @@ function handleMessage(raft, message) {
   if (raft.state === "leader") {
     raft.log.push({
       ...message,
-      sender: message.sender.id || message.sender.peer,
+      sender: message.sender.id || message.sender.peer || message.sender,
     });
   } else {
     if (raft.leader) {
@@ -215,6 +218,7 @@ function handleMessage(raft, message) {
 }
 
 function handleRaftMessage(raft, message) {
+  raftResetTimeout(raft);
   const type = message.type.substring("RAFT_".length);
   if (type === "REQUEST_VOTE") {
     handleRequestVote(raft, message);
@@ -226,6 +230,12 @@ function handleRaftMessage(raft, message) {
     handleMessage(raft, message);
   } else if (type === "APPEND_ENTRIES_RESPONSE") {
     handleAppendEntriesResponse(raft, message);
+  }
+
+  if (!type.startsWith("APPEND_ENTRIES")) {
+    console.log("Raft message", type, message);
+  } else if (type === "APPEND_ENTRIES" && message.entries.length !== 0) {
+    console.log("Raft message", type, message);
   }
 }
 
