@@ -1,4 +1,4 @@
-const randomTimeout = () => Math.random() * 1000 + 3000;
+const randomTimeout = () => Math.random() * 1100 + 3000;
 
 const raftResetTimeout = (raft) => {
   clearTimeout(raft.timeout);
@@ -32,10 +32,10 @@ const raftConvertToCandidate = (raft) => {
   raft.votedFor = raft.peer.id;
   raft.votesReceived = 0;
   raftResetTimeout(raft);
-  raftVoteReceived(raft);
   if (raft.heartbeatTimeout) {
     clearInterval(raft.heartbeatTimeout);
   }
+  raftVoteReceived(raft);
 
   Object.entries(raft.getClients()).forEach(([id, conn]) => {
     conn.send({
