@@ -71,7 +71,7 @@
 
     const initConnection = (conn) => {
       conn.on("data", (message) => {
-        console.log(conn.peer, message);
+        // console.log(conn.peer, message);
 
         if (message.type.startsWith("RAFT_")) {
           message.sender = clients[conn.peer];
@@ -166,6 +166,8 @@
       debug.innerHTML = "My ID " + peer.id + "<br>";
       debug.innerHTML += "<br>Connections " + Object.keys(clients).length;
       debug.innerHTML += "<br>Raft state " + raft.state;
+      debug.innerHTML += "<br>Term " + raft.term;
+      debug.innerHTML += "<br>Commit index " + raft.commitIndex;
 
       textarea.value = "";
       raft.log.forEach((entry) => {

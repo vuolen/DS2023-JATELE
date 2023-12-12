@@ -58,6 +58,7 @@ const raftConvertToLeader = (raft) => {
 const startHeartbeat = (raft) => {
   if (raft.state === "leader") {
     raft.heartbeatTimeout = setInterval(() => {
+      let commitConfirmed = false;
       while (raft.commitIndex < raft.log.length - 1) {
         const n_clients = Object.keys(raft.getClients()).length + 1;
         const n_received = Object.values(raft.getClients())
@@ -69,11 +70,19 @@ const startHeartbeat = (raft) => {
           break;
         }
 
+        console.log("Committing");
         raft.commitIndex++;
+        commitConfirmed = true;
       }
+
       Object.values(raft.getClients()).forEach((client) => {
-        const clientNextIndex = raft.nextIndex[client.id] || 0;
-        const entries = raft.log.slice(clientNextIndex);
+        let entries;
+        if (client.lastSentIndex === undefined) {
+          entries = raft.log;
+          client.lastSentIndex = raft.log.length;
+        } else {
+          entries = commitConfirmed ? raft.log.slice(client.lastSentIndex) : [];
+        }
 
         client.send({
           type: "RAFT_APPEND_ENTRIES",
@@ -81,7 +90,14 @@ const startHeartbeat = (raft) => {
           leaderId: raft.peer.id,
           entries: entries,
           leaderCommit: raft.commitIndex,
+          prevLogIndex: client.lastSentIndex - 1,
+          lastLogIndex: raft.log.length - 1,
+          lastLogTerm: raft.log[raft.log.length - 1].term,
         });
+
+        if (commitConfirmed) {
+          client.lastSentIndex = raft.log.length;
+        }
       });
     }, 1000);
   }
@@ -160,8 +176,11 @@ function handleAppendEntries(raft, message) {
       raft.commitIndex = Math.min(message.leaderCommit, raft.log.length - 1);
     }
 
-    raft.log.push(...message.entries);
-    console.log(raft.log);
+    if (message.prevLogIndex >= 0) {
+      raft.log = raft.log.slice(0, message.prevLogIndex + 2);
+    }
+  
+    raft.log.push(...message.entries);  
 
     message.sender.send({
       type: "RAFT_APPEND_ENTRIES_RESPONSE",
