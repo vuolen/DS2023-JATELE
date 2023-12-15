@@ -134,17 +134,19 @@
 
     peer.on("connection", (conn) => {
       console.info("Connection received from ", conn.peer);
-      clients[conn.peer] = conn;
 
-      if (raft.state === "leader") {
-        handleRaftMessage(raft, {
-          type: "RAFT_MESSAGE",
-          text: `User ${conn.peer} has joined the chat`,
-          sender: "SYSTEM",
-        });
-      }
-
-      initConnection(conn);
+      conn.on("open", () => {
+        console.info("Connected to ", conn.peer);
+        clients[conn.peer] = conn;
+        if (raft.state === "leader") {
+          handleRaftMessage(raft, {
+            type: "RAFT_MESSAGE",
+            text: `User ${conn.peer} has joined the chat`,
+            sender: "SYSTEM",
+          });
+        }
+        initConnection(conn);
+      });
     });
 
     setInterval(() => {
